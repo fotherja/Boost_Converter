@@ -1,17 +1,28 @@
 /* 
 Author: James Fotherby
+
+To Do:
+LED indication of different states:
+  - Fully Charged
+  - Charging
+  - Not connected
+
+  Need to Do a test every 15 seconds or so to see whether disabling pwm causes the output voltage to drop to 19v. This would indicate nothing is connected.
+  If not connected - flash pattern + loop until voltage is detected.
+  When detected flash duty according to Vout, when Vout >= 32.8v the duty should be 100%, and 10% when 25.0v. 
 */ 
 
-//pin descriptions
-const int PWM_FET = 9;                                                          //OC1A - 16bit PWM output
+// Pin descriptions
+#define PWM_FET               9                                                 //OC1A - 16bit PWM output
 
-const int LED = A1;
-const int VinSense  = A3;
-const int IoutSense = A4;
-const int VoutSense = A5;
+#define LED                   A1
+#define VinSense              A3
+#define IoutSense             A4
+#define VoutSense             A5
 
-const float VOLTAGE_SENSE_CONST = 0.0537109;
-const float CURRENT_SENSE_CONST = 0.02639;
+// Constants
+#define VOLTAGE_SENSE_CONST   0.0537109
+#define CURRENT_SENSE_CONST   0.02639
                 
 // Variables
 int ICR_Reg = 299;                                                              // 53KHz PWM frequency                                                           
@@ -19,16 +30,22 @@ float VoltageSetPoint = 32.8;                                                   
 float CurrentSetPoint = 1.4;                                                    // This value means under 4A in for the whole charge (the inductor's saturation limit)
 float Vout;
 float Vin;
-float Iout;
+float Iout;                                                             
 
-int ledState = LOW;                                                             // LedState used to set the LED
+byte LED_Duty;
 
-unsigned long previousMillis = 0;                                               // Will store last time LED was updated
-unsigned long previousMicrosA = 0;                                              // Will store last time check was performed
-unsigned long previousMicrosB = 0;                                              // Will store last time PWM was updated
-const long intervalLED = 400;                                                   // Interval at which to blink LED (milliseconds)
-const long intervalPWM = 5000;                                                  // Interval in which to sample voltage and update PWM values (microseconds)
-const long intervalChk = 100;                                                   // Interval to check for over voltage. Short enough to catch runnaways from sudden disconnections
+unsigned long CurrentMicros[5] = {0,0,0,0,0};
+unsigned long PreviousMicros[5] = {0,0,0,0,0};
+unsigned long Interval[5] = {100, 5000, 60000, 500000, 15000000};
+
+float Charge_Levels[10] = {29.6, 30.4, 30.8, 31.2, 31.6, 32.0, 32.4, 32.8, 33.2, 33.8};
+
+// Methods
+void Check_Battery_Status(void);
+void Iterate_Control_Loop(void);
+void Display_Debug_Data(void);
+void Over_Volt_Check(void);
+void Toggle_LED(void);
 
 //##############################################################################
 // SETUP
@@ -45,21 +62,9 @@ void setup()
   
   TCCR1A = 0b11000010;
   TCCR1B = 0b00011001;                                                          // Fast PWM, No Prescaling of the clock
-  
-  if((analogRead(VinSense) * VOLTAGE_SENSE_CONST) < 18)
-   {
-     Serial.println("Paused until input voltage above 18 volts");
-     while((analogRead(VinSense) * VOLTAGE_SENSE_CONST) < 18) 
-     {
-        digitalWrite(LED, HIGH);
-        delay(100);
-        digitalWrite(LED, LOW);
-        delay(100);       
-     }
-   }
    
   Serial.println("Starting up...");
-  delay(2000); 
+  delay(500); 
 }
 
 //##############################################################################
@@ -67,96 +72,212 @@ void setup()
 //##############################################################################
 void loop() 
 {   
-  
-// Perform check to see if output voltage has risen too high -------------------
-  unsigned long currentMicrosA = micros();
-  if (currentMicrosA - previousMicrosA >= intervalChk) 
-  {    
-    previousMicrosA = currentMicrosA;     
-  
-    Vout = analogRead(VoutSense) * VOLTAGE_SENSE_CONST;                         // Convert Analogue read to real voltage value
-    
-    if(Vout > VoltageSetPoint + 2.0)                                            // If voltage goes 2 volts higher than the set point. Shut off immediately
+  for(int i = 0;i < 5;i++)
+  {
+    CurrentMicros[i] = micros();
+    if (CurrentMicros[i] - PreviousMicros[i] >= Interval[i]) 
     {
-      OCR1A = 0;
-      Serial.println("OVER VOLTAGE, RESET PWM");
-      delay(10);      
-    }
-  }    
-  
-// Adjust PWM duty cycle until desired output voltage and current is reached ----  
-  unsigned long currentMicrosB = micros();
-  if (currentMicrosB - previousMicrosB >= intervalPWM) 
-  {    
-    previousMicrosB = currentMicrosB;     
-  
-    Vout = analogRead(VoutSense) * VOLTAGE_SENSE_CONST;                         // Convert Analogue read to real voltage value
-    Iout = (analogRead(IoutSense)  - 512) * CURRENT_SENSE_CONST; 
-    
-    if((Vout < VoltageSetPoint) && (Iout < CurrentSetPoint))
-    {
-      OCR1A = min(OCR1A, (ICR_Reg));                                            // Limit maximum 
-      OCR1A = min(OCR1A, (ICR_Reg - 50));
-      OCR1A++;
-    } else {
-      OCR1A = max(OCR1A, 1);                                                    // Limit minimum duty cycle to 0% obviously
-      OCR1A--;
-    }
-  }  
-  
-// Debuging ----------------------------------------------------------------------
-  unsigned long currentMillis = millis();    
-  if (currentMillis - previousMillis >= intervalLED) 
-  {    
-    previousMillis = currentMillis; 
-    
-    // if the LED is off turn it on and vice-versa:
-    if (ledState == LOW) {
-      ledState = HIGH;
-    } else {
-      ledState = LOW;
-    }    
-    digitalWrite(LED, ledState);                                                // Set the LED with the ledState of the variable:
-    
-    Iout = (analogRead(IoutSense)  - 512) * CURRENT_SENSE_CONST;    
-    Vin = analogRead(VinSense) * VOLTAGE_SENSE_CONST;
+      PreviousMicros[i] = CurrentMicros[i]; 
 
-    Serial.print("Vout: ");
-    Serial.print(Vout);
-    
-    Serial.print("/");
-    Serial.println(VoltageSetPoint);   
-    
-    Serial.print("Iout: ");
-    Serial.print(Iout);    
-   
-    Serial.print("/");
-    Serial.println(CurrentSetPoint); 
-    
-    Serial.print("OCR1A: ");
-    Serial.print(OCR1A);    
-    Serial.print("/");
-    Serial.println(ICR_Reg);
-    
-    Serial.print("Vin: ");
-    Serial.println(Vin);  
-    Serial.println(); 
-    
-    
-    if(Vin < 17.0)
-    {
-      Serial.println("Input voltage below 18 volts! PAUSED");
-      OCR1A = 0;
-      while((analogRead(VinSense) * VOLTAGE_SENSE_CONST) < 18) 
-      {
-        digitalWrite(LED, HIGH);
-        delay(100);
-        digitalWrite(LED, LOW);
-        delay(100);        
+      switch (i) {
+      case 0:
+        Over_Volt_Check();                                                    // 1) Perform check to see if output voltage has risen too high
+        break;
+        
+      case 1:
+        Iterate_Control_Loop();                                               // 2) Adjust PWM duty cycle until desired output voltage or current is reached
+        break;
+        
+      case 2:
+        Toggle_LED();                                                         // 3) Flash LED to indicate current state
+        break;
+        
+      case 3:
+        Display_Debug_Data();                                                 // 4) Display Debug Info
+        break;
+        
+      case 4:
+        Check_Battery_Status();                                               // 5) Check Whether Battery Connected etc
+        break;                
       }
     }
-  }  
-
+  }
 } 
+
+//##############################################################################
+// SUBROUTINES
+//##############################################################################
+void Over_Volt_Check()
+{
+  Vout = analogRead(VoutSense) * VOLTAGE_SENSE_CONST;                           // Convert Analogue read to real voltage value
+  
+  if(Vout > VoltageSetPoint + 2.0)                                              // If voltage goes 2 volts higher than the set point. Shut off immediately
+  {
+    OCR1A = 0;
+    Serial.println("OVER VOLTAGE, RESET PWM");
+    delay(10);      
+  }  
+}
+
+//==============================================================================
+void Iterate_Control_Loop()
+{
+  Vout = analogRead(VoutSense) * VOLTAGE_SENSE_CONST;                           // Convert Analogue read to real voltage value
+  Iout = (analogRead(IoutSense)  - 512) * CURRENT_SENSE_CONST; 
+  
+  if((Vout < VoltageSetPoint) && (Iout < CurrentSetPoint))
+  {
+    OCR1A = min(OCR1A, (ICR_Reg));                                              // Limit maximum 
+    OCR1A = min(OCR1A, (ICR_Reg - 50));
+    OCR1A++;
+  } 
+  else 
+  {
+    OCR1A = max(OCR1A, 1);                                                      // Limit minimum duty cycle to 0% obviously
+    OCR1A--;
+  }
+}
+
+//==============================================================================
+void Toggle_LED()
+{
+  static byte ledState;
+  static byte LED_Duty_Counter = 0;
+
+  LED_Duty_Counter++;
+  if(LED_Duty_Counter > 9)
+    LED_Duty_Counter = 0;
+  
+  if(LED_Duty_Counter >= LED_Duty)
+    ledState = LOW; 
+  else 
+    ledState = HIGH; 
+       
+  digitalWrite(LED, ledState);                                                  // Set the LED with the ledState of the variable: 
+}
+
+//==============================================================================
+void Display_Debug_Data()
+{
+  Serial.print("Vout: ");
+  Serial.print(Vout);
+  
+  Serial.print("/");
+  Serial.println(VoltageSetPoint);   
+  
+  Serial.print("Iout: ");
+  Serial.print(Iout);    
+ 
+  Serial.print("/");
+  Serial.println(CurrentSetPoint); 
+  
+  Serial.print("OCR1A: ");
+  Serial.print(OCR1A);    
+  Serial.print("/");
+  Serial.println(ICR_Reg);
+  
+  Serial.print("Vin: ");
+  Serial.println(Vin);  
+  Serial.println();  
+
+  Vin = analogRead(VinSense) * VOLTAGE_SENSE_CONST;
+  if(Vin < 17.0)
+  {
+    OCR1A = 0;
+    Serial.println("Input voltage below 18 volts! PAUSED");
+    
+    while((analogRead(VinSense) * VOLTAGE_SENSE_CONST) < 18.0) 
+    {
+      LED_Duty = 5;
+      Toggle_LED();
+      delay(10);      
+    }
+  }
+}
+
+//==============================================================================
+void Check_Battery_Status()
+{
+  OCR1A = 0;
+  delay(100);
+
+  float V_test = analogRead(VoutSense) * VOLTAGE_SENSE_CONST;
+
+  // Checks if battery is fully charged. If so, the target voltage will be reached and current flow will be zero. Also checks for disconnect...
+  float TempStore = VoltageSetPoint;
+  int counter = 0;
+  while(V_test >= VoltageSetPoint && Iout <= 0.1)
+  { 
+    VoltageSetPoint = TempStore - 0.25;
+    
+    LED_Duty = 10;
+    Toggle_LED();
+    delay(10);  
+
+    counter++;
+    V_test = analogRead(VoutSense) * VOLTAGE_SENSE_CONST;
+  }
+
+
+  // The decay was fast enough to suspect it was due to self discharge. Otherwise the battery would maintain the voltage.
+  static byte Suspect_Disconnected_Battery = 0;
+  if(counter < 15)  {
+    Suspect_Disconnected_Battery++;
+  }  else  {
+    Suspect_Disconnected_Battery -= 2;    
+  }    
+    
+  Suspect_Disconnected_Battery = max(Suspect_Disconnected_Battery, 0);
+  Suspect_Disconnected_Battery = min(Suspect_Disconnected_Battery, 20);
+  VoltageSetPoint = TempStore;
+
+
+  // If we've had 4 Suspect_Disconnected_Battery +ve tests do a final check then indicate such condition and wait until a battery is connected 
+  if(Suspect_Disconnected_Battery >= 4)
+  {
+    delay(7500);                                                                // Should allow enough time for voltage to decay to ~19volts
+    Suspect_Disconnected_Battery = 0;
+    V_test = analogRead(VoutSense) * VOLTAGE_SENSE_CONST;
+    
+    while(V_test < 22.0)
+    {
+      LED_Duty = 0;
+      Toggle_LED(); 
+      delay(2500); 
+      
+      LED_Duty = 10;
+      Toggle_LED(); 
+      delay(50);
+
+      Serial.println("Battery Disconnected... PAUSED");
+      V_test = analogRead(VoutSense) * VOLTAGE_SENSE_CONST;
+    }
+  }
+
+
+  // Flash the LED at a duty that represents the batteries charge status.
+  LED_Duty = 1;                                                           
+  for(int i = 0; i < 9; i++)
+  {
+    if(V_test > Charge_Levels[i])
+      LED_Duty++;
+  }  
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
