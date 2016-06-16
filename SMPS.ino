@@ -76,7 +76,7 @@ void loop()
   
     Vout = analogRead(VoutSense) * VOLTAGE_SENSE_CONST;                         // Convert Analogue read to real voltage value
     
-    if(Vout > VoltageSetPoint + 2.0)                                            // If voltage go 2volts higher than the set point. Shut off immediately
+    if(Vout > VoltageSetPoint + 2.0)                                            // If voltage goes 2 volts higher than the set point. Shut off immediately
     {
       OCR1A = 0;
       Serial.println("OVER VOLTAGE, RESET PWM");
@@ -121,25 +121,24 @@ void loop()
     Iout = (analogRead(IoutSense)  - 512) * CURRENT_SENSE_CONST;    
     Vin = analogRead(VinSense) * VOLTAGE_SENSE_CONST;
 
-    Serial.print("Output voltage: ");
-    Serial.println(Vout);
+    Serial.print("Vout: ");
+    Serial.print(Vout);
     
-    Serial.print("Taget output voltage: ");
+    Serial.print("/");
     Serial.println(VoltageSetPoint);   
     
-    Serial.print("Output current: ");
-    Serial.println(Iout);    
+    Serial.print("Iout: ");
+    Serial.print(Iout);    
    
-    Serial.print("Taget output current: ");
+    Serial.print("/");
     Serial.println(CurrentSetPoint); 
     
     Serial.print("OCR1A: ");
-    Serial.print(OCR1A);
-    
-    Serial.print(" / ");
+    Serial.print(OCR1A);    
+    Serial.print("/");
     Serial.println(ICR_Reg);
     
-    Serial.print("VinSense: ");
+    Serial.print("Vin: ");
     Serial.println(Vin);  
     Serial.println(); 
     
