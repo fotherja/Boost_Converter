@@ -205,32 +205,32 @@ void Check_Battery_Status()
 
   // Checks if battery is fully charged. If so, the target voltage will be reached and current flow will be zero. Also checks for disconnect...
   float TempStore = VoltageSetPoint;
-  int counter = 0;
-  while(V_test >= VoltageSetPoint && Iout <= 0.1)
+  byte counter = 0;
+  while(V_test >= TempStore && Iout <= 0.1)
   { 
-    VoltageSetPoint = TempStore - 0.25;
+    TempStore = VoltageSetPoint - 0.25;
     
     LED_Duty = 10;
     Toggle_LED();
     delay(10);  
 
     counter++;
+    counter = min(counter, 100);
+    if(counter == 99)    {      
+      Serial.println("Battery Fully Charged... PAUSED");
+    }
+    
     V_test = analogRead(VoutSense) * VOLTAGE_SENSE_CONST;
   }
-
 
   // The decay was fast enough to suspect it was due to self discharge. Otherwise the battery would maintain the voltage.
   static byte Suspect_Disconnected_Battery = 0;
   if(counter < 15)  {
     Suspect_Disconnected_Battery++;
   }  else  {
-    Suspect_Disconnected_Battery -= 2;    
-  }    
-    
-  Suspect_Disconnected_Battery = max(Suspect_Disconnected_Battery, 0);
-  Suspect_Disconnected_Battery = min(Suspect_Disconnected_Battery, 20);
-  VoltageSetPoint = TempStore;
-
+    Suspect_Disconnected_Battery -= 2;
+    Suspect_Disconnected_Battery = max(Suspect_Disconnected_Battery, 0);    
+  }
 
   // If we've had 4 Suspect_Disconnected_Battery +ve tests do a final check then indicate such condition and wait until a battery is connected 
   if(Suspect_Disconnected_Battery >= 4)
@@ -263,21 +263,5 @@ void Check_Battery_Status()
       LED_Duty++;
   }  
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
