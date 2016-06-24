@@ -7,8 +7,8 @@ LED indication of different states:
   - Charging
   - Not connected
 
-  Need to Do a test every 15 seconds or so to see whether disabling pwm causes the output voltage to drop to 19v. This would indicate nothing is connected.
-  If not connected - flash pattern + loop until voltage is detected.
+  A test is done every 15 seconds or so to see whether disabling pwm causes the output voltage to drop to 19v. This would indicate nothing is connected to the output
+  and that it is RC decaying through the voltage dividor for the Arduino's ADC.
   When detected flash duty according to Vout, when Vout >= 32.8v the duty should be 100%, and 10% when 25.0v. 
 */ 
 
@@ -225,7 +225,7 @@ void Check_Battery_Status()
 
   // The decay was fast enough to suspect it was due to self discharge. Otherwise the battery would maintain the voltage.
   static byte Suspect_Disconnected_Battery = 0;
-  if(counter < 15)  {
+  if(counter > 0 && counter < 15)  {
     Suspect_Disconnected_Battery++;
   }  else  {
     Suspect_Disconnected_Battery -= 2;
@@ -263,5 +263,6 @@ void Check_Battery_Status()
       LED_Duty++;
   }  
 }
+
 
 
